@@ -1,0 +1,12 @@
+login
+api
+index
+robots.txt
+sitemap.xml
+.env
+.git
+backup
+config
+admin
+profile
+user
