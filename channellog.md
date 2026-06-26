@@ -4,6 +4,12 @@ This file is the single place for update notes and changelog entries.
 
 ## Bug Bounty OS & Intelligence Architecture
 
+### Phase 7.5: Architecture Hardening
+- **Concurrency**: Protected `MemoryStore` with `sync.RWMutex` across all map accesses to prevent data races during concurrent ingestion.
+- **Deterministic Replay**: Sorted map keys in `CampaignDiff` endpoint iteration and removed `time.Now()` pollution from projection generation, ensuring byte-for-byte reproducibility of reports (verified by `TestExportDeterminism`).
+- **Ledger Secrets Safety**: Implemented `EvidenceSanitizer` middleware to proactively strip credentials (`Authorization`, `Cookie`, `X-API-Key`, `JWT`) from events before they are committed to the immutable ledger.
+- **Storage Contract & Analytics**: Upgraded `EventStore` interface to require `context.Context` for future DB adapters, and capped Risk `Attack Surface Expansion` signals to prevent wildcard alert fatigue.
+
 ### Phase 6.12: Campaign Intelligence Analytics
 - Formalized DirFuzz as an Analyst Operations Platform by measuring intelligence effectiveness and computing operational risks.
 - Overhauled memory with an exponential `KnowledgeDecay` engine enforcing a strict half-life on findings, mitigating poisoning from stale architecture patterns.
