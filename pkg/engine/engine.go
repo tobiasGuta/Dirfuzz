@@ -314,6 +314,16 @@ type Result struct {
 	DriftDeltaBytes       int               `json:"drift_delta_bytes,omitempty"`
 	DiscoveredParams      []string          `json:"discovered_params,omitempty"`
 	PreviousResponseBytes []byte            `json:"-"`
+	AuthRoles             []AuthRoleDetail  `json:"auth_roles,omitempty"`
+}
+
+type AuthRoleDetail struct {
+	Role          string `json:"role"`
+	StatusCode    int    `json:"status"`
+	Request       string `json:"request,omitempty"`
+	Response      string `json:"response,omitempty"`
+	RequestBytes  []byte `json:"-"`
+	ResponseBytes []byte `json:"-"`
 }
 
 type previousScanEntry struct {
@@ -3602,27 +3612,33 @@ func (e *Engine) worker(id int) {
 			var timingOracleZ float64
 			var samples []time.Duration
 			var oracleErr error
+			var allAuthRoles []authMatrixRoleResponse
 			oracleEnabled := snap.TimingOracle && e.timingOracle != nil
 
-			if job.Method == "" {
-				bodyFilterActive := e.matchRe.Load() != nil || e.filterRe.Load() != nil ||
-					filterWords >= 0 || filterLines >= 0 || matchWords >= 0 || matchLines >= 0 ||
-					len(matchContentTypes) > 0 || len(filterContentTypes) > 0
-
-				if len(authMatrix) > 0 {
+			if len(authMatrix) > 0 {
+				successfulMethod = job.Method
+				if successfulMethod == "" {
 					successfulMethod = "GET"
-					resp, rawRequest, successfulMethod, authFinding, err = e.executeAuthMatrixRequests(
-						localCtx,
-						currentBaseURL,
-						reqPath,
-						reqHost,
-						ua,
-						reqHeaders,
-						requestTimeout,
-						proxyAddr,
-						authMatrix,
-					)
-				} else {
+				}
+				resp, rawRequest, successfulMethod, authFinding, allAuthRoles, err = e.executeAuthMatrixRequests(
+					localCtx,
+					currentBaseURL,
+					reqPath,
+					reqHost,
+					ua,
+					successfulMethod,
+					reqHeaders,
+					requestTimeout,
+					proxyAddr,
+					authMatrix,
+				)
+				atomic.AddInt64(&e.ProcessedLines, 1)
+			} else {
+				if job.Method == "" {
+					bodyFilterActive := e.matchRe.Load() != nil || e.filterRe.Load() != nil ||
+						filterWords >= 0 || filterLines >= 0 || matchWords >= 0 || matchLines >= 0 ||
+						len(matchContentTypes) > 0 || len(filterContentTypes) > 0
+
 					if bodyFilterActive || e.isHeadRejected(reqHost) || followRedirects || oracleEnabled {
 						successfulMethod = "GET"
 						rawRequest = buildRequest("GET", reqPath, reqHost, ua, headersStr, pluginBody)
@@ -3653,45 +3669,45 @@ func (e *Engine) worker(id int) {
 							}
 						}
 					}
-				}
-				atomic.AddInt64(&e.ProcessedLines, 1)
-			} else {
-				successfulMethod = job.Method
-				bodyContent = ""
-				var methodHdrBuf strings.Builder
-				methodHdrBuf.WriteString(headersStr)
-
-				hasContentType := false
-				for k := range headers {
-					if strings.EqualFold(k, "Content-Type") {
-						hasContentType = true
-						break
-					}
-				}
-
-				bodyContent = pluginBody
-				if bodyContent != "" && (job.Method == "POST" || job.Method == "PUT" || job.Method == "PATCH") {
-					methodHdrBuf.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(bodyContent)))
-					if !hasContentType {
-						methodHdrBuf.WriteString("Content-Type: application/x-www-form-urlencoded\r\n")
-					}
-				} else if job.Method == "POST" || job.Method == "PUT" || job.Method == "PATCH" || job.Method == "DELETE" {
-					methodHdrBuf.WriteString("Content-Length: 0\r\n")
-				}
-				rawRequest = buildRequest(job.Method, reqPath, reqHost, ua, methodHdrBuf.String(), bodyContent)
-				if oracleEnabled {
-					resp, samples, oracleErr = e.executeTimingOracleRequests(localCtx, currentBaseURL, rawRequest, requestTimeout, proxyAddr)
-					if oracleErr != nil {
-						err = oracleErr
-					} else if e.timingOracle != nil {
-						timingMedian = e.timingOracle.Median(samples)
-						timingOracleHit = e.timingOracle.IsAnomaly(timingMedian)
-						timingOracleZ = e.timingOracle.ZScore(timingMedian)
-					}
+					atomic.AddInt64(&e.ProcessedLines, 1)
 				} else {
-					resp, err = e.executeRequestWithRetry(localCtx, currentBaseURL, rawRequest, requestTimeout, proxyAddr)
+					successfulMethod = job.Method
+					bodyContent = ""
+					var methodHdrBuf strings.Builder
+					methodHdrBuf.WriteString(headersStr)
+
+					hasContentType := false
+					for k := range headers {
+						if strings.EqualFold(k, "Content-Type") {
+							hasContentType = true
+							break
+						}
+					}
+
+					bodyContent = pluginBody
+					if bodyContent != "" && (job.Method == "POST" || job.Method == "PUT" || job.Method == "PATCH") {
+						methodHdrBuf.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(bodyContent)))
+						if !hasContentType {
+							methodHdrBuf.WriteString("Content-Type: application/x-www-form-urlencoded\r\n")
+						}
+					} else if job.Method == "POST" || job.Method == "PUT" || job.Method == "PATCH" || job.Method == "DELETE" {
+						methodHdrBuf.WriteString("Content-Length: 0\r\n")
+					}
+					rawRequest = buildRequest(job.Method, reqPath, reqHost, ua, methodHdrBuf.String(), bodyContent)
+					if oracleEnabled {
+						resp, samples, oracleErr = e.executeTimingOracleRequests(localCtx, currentBaseURL, rawRequest, requestTimeout, proxyAddr)
+						if oracleErr != nil {
+							err = oracleErr
+						} else if e.timingOracle != nil {
+							timingMedian = e.timingOracle.Median(samples)
+							timingOracleHit = e.timingOracle.IsAnomaly(timingMedian)
+							timingOracleZ = e.timingOracle.ZScore(timingMedian)
+						}
+					} else {
+						resp, err = e.executeRequestWithRetry(localCtx, currentBaseURL, rawRequest, requestTimeout, proxyAddr)
+					}
+					atomic.AddInt64(&e.ProcessedLines, 1)
 				}
-				atomic.AddInt64(&e.ProcessedLines, 1)
 			}
 
 			if err != nil {
@@ -3974,6 +3990,25 @@ func (e *Engine) worker(id int) {
 			if saveRaw {
 				result.Request = string(rawRequest)
 				result.Response = string(resp.Raw)
+			}
+
+			if len(allAuthRoles) > 0 {
+				for _, ar := range allAuthRoles {
+					if ar.resp == nil {
+						continue
+					}
+					dt := AuthRoleDetail{
+						Role:          ar.role,
+						StatusCode:    ar.resp.StatusCode,
+						RequestBytes:  append([]byte(nil), ar.rawRequest...),
+						ResponseBytes: append([]byte(nil), ar.resp.Raw...),
+					}
+					if saveRaw {
+						dt.Request = string(ar.rawRequest)
+						dt.Response = string(ar.resp.Raw)
+					}
+					result.AuthRoles = append(result.AuthRoles, dt)
+				}
 			}
 
 			if resp.StatusCode >= 300 && resp.StatusCode < 400 && !followRedirects {

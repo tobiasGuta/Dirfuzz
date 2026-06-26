@@ -64,6 +64,9 @@ dirfuzz-audit.jsonl
 **/dirfuzz-audit.jsonl
 # Ignore various result formats
 *.jsonl
+.dirfuzz-resume.json
+.dirfuzz-resume.json.bloom
+dirfuzz-metrics-*.json
 *.csv
 *.url
 /scans/

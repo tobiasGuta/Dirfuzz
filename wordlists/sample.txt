@@ -10,3 +10,4 @@ config
 admin
 profile
 user
+places

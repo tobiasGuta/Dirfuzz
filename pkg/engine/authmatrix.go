@@ -60,15 +60,15 @@ type AuthMatrixReport struct {
 
 func (e *Engine) executeAuthMatrixRequests(
 	ctx context.Context,
-	targetURL, reqPath, reqHost, ua string,
+	targetURL, reqPath, reqHost, ua, method string,
 	baseHeaders map[string]string,
 	timeout time.Duration,
 	proxyAddr string,
 	authMatrix map[string][]string,
-) (*httpclient.RawResponse, []byte, string, *AuthMatrixFinding, error) {
+) (*httpclient.RawResponse, []byte, string, *AuthMatrixFinding, []authMatrixRoleResponse, error) {
 	roles := normalizeAuthRoles(authMatrix)
 	if len(roles) == 0 {
-		return nil, nil, "", nil, nil
+		return nil, nil, "", nil, nil, nil
 	}
 
 	if ctx == nil {
@@ -77,34 +77,28 @@ func (e *Engine) executeAuthMatrixRequests(
 
 	parsedTarget, err := url.Parse(targetURL)
 	if err != nil {
-		return nil, nil, "", nil, fmt.Errorf("invalid auth-matrix target URL: %w", err)
+		return nil, nil, "", nil, nil, fmt.Errorf("invalid auth-matrix target URL: %w", err)
 	}
 
 	if reqPath == "" {
 		reqPath = "/"
 	}
-	method := "GET"
 
 	results := make([]authMatrixRoleResponse, len(roles))
-	var wg sync.WaitGroup
+
 	for i, role := range roles {
-		wg.Add(1)
-		go func(i int, role authMatrixRole) {
-			defer wg.Done()
-			roleHeaders := mergeAuthHeaders(baseHeaders, role.headers)
-			headersStr := renderHeaderBlock(roleHeaders)
-			rawReq := buildRequest(method, reqPath, reqHost, ua, headersStr, "")
-			resp, err := e.executeRequestWithRetry(ctx, parsedTarget.String(), rawReq, timeout, proxyAddr)
-			results[i] = authMatrixRoleResponse{
-				role:       role.role,
-				level:      role.level,
-				rawRequest: rawReq,
-				resp:       resp,
-				err:        err,
-			}
-		}(i, role)
+		roleHeaders := mergeAuthHeaders(baseHeaders, role.headers)
+		headersStr := renderHeaderBlock(roleHeaders)
+		rawReq := buildRequest(method, reqPath, reqHost, ua, headersStr, "")
+		resp, err := e.executeRequestWithRetry(ctx, parsedTarget.String(), rawReq, timeout, proxyAddr)
+		results[i] = authMatrixRoleResponse{
+			role:       role.role,
+			level:      role.level,
+			rawRequest: rawReq,
+			resp:       resp,
+			err:        err,
+		}
 	}
-	wg.Wait()
 
 	successes := make([]authMatrixRoleResponse, 0, len(results))
 	for _, res := range results {
@@ -114,13 +108,13 @@ func (e *Engine) executeAuthMatrixRequests(
 	}
 	if len(successes) == 0 {
 		if len(results) > 0 && results[0].err != nil {
-			return nil, nil, "", nil, results[0].err
+			return nil, nil, "", nil, nil, results[0].err
 		}
-		return nil, nil, "", nil, fmt.Errorf("auth matrix requests failed for %s", targetURL)
+		return nil, nil, "", nil, nil, fmt.Errorf("auth matrix requests failed for %s", targetURL)
 	}
 
 	selected, finding := evaluateAuthMatrixResponses(reqPath, successes)
-	return selected.resp, selected.rawRequest, method, finding, nil
+	return selected.resp, selected.rawRequest, method, finding, successes, nil
 }
 
 func normalizeAuthRoles(authMatrix map[string][]string) []authMatrixRole {
@@ -183,7 +177,7 @@ func renderHeaderBlock(headers map[string]string) string {
 	for k := range headers {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+
 	var b strings.Builder
 	for _, k := range keys {
 		b.WriteString(fmt.Sprintf("%s: %s\r\n", k, headers[k]))
@@ -204,10 +198,7 @@ func evaluateAuthMatrixResponses(path string, responses []authMatrixRoleResponse
 	userRole := pickAuthRoleResponse(responses, 1)
 	adminRole := pickAuthRoleResponse(responses, 2)
 
-	if publicRole != nil && userRole != nil && sameAuthResponse(publicRole.resp, userRole.resp) {
-		selected = *publicRole
-		return selected, nil
-	}
+
 
 	if userRole == nil || adminRole == nil {
 		return selected, nil

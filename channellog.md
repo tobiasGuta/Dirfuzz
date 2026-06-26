@@ -4,6 +4,12 @@ This file is the single place for update notes and changelog entries.
 
 ## Bug Bounty OS & Intelligence Architecture
 
+### TUI & AuthMatrix Enhancements
+- **AuthMatrix Logic Fix**: Resolved a critical engine bug where explicitly specifying `-m GET` via CLI overrode the entire AuthMatrix (`--auth`) evaluation logic, silently falling back to unauthenticated single-requests. 
+- **Tabbed Identity Inspection**: Overhauled the `StateDetail` view in the TUI (`pkg/tui/tui.go`) to display a tabbed interface for AuthMatrix results (`[ mobilecookie ] [ privatecookie ]`). Added dynamic hot-swapping using `Left`, `Right`, and `Tab` keys to effortlessly cycle and inspect the precise raw request/response byte slices corresponding to each evaluated identity.
+- **WAF Concurrency Bypasses**: Altered the engine's AuthMatrix execution loop (`executeAuthMatrixRequests`) to fire credential permutations sequentially rather than concurrently, mitigating aggressive rate-limiting WAF blocks and false 403s on distributed targets (like Cloudflare).
+
+
 ### Phase 7.5: Architecture Hardening
 - **Concurrency**: Protected `MemoryStore` with `sync.RWMutex` across all map accesses to prevent data races during concurrent ingestion.
 - **Deterministic Replay**: Sorted map keys in `CampaignDiff` endpoint iteration and removed `time.Now()` pollution from projection generation, ensuring byte-for-byte reproducibility of reports (verified by `TestExportDeterminism`).

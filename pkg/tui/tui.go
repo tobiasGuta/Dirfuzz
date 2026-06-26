@@ -2309,6 +2309,7 @@ type Model struct {
 	atBottom      bool
 
 	// Detail Viewports
+	detailAuthRoleIdx int
 	reqViewport       viewport.Model
 	resViewport       viewport.Model
 	hexViewport       viewport.Model
@@ -4048,6 +4049,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == StateList {
 				if m.selectedIndex >= 0 && m.selectedIndex < len(m.logLineHits) && m.logLineHits[m.selectedIndex] != nil {
 					m.state = StateDetail
+					m.detailAuthRoleIdx = 0
 					m.updateDetailView()
 				} else {
 					m.statusMessage = mutedStyle.Render("No request data for this line.")
@@ -4106,6 +4108,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == StateCommand {
 				m.cmdViewport.LineUp(1)
 				return m, nil
+			}
+
+		case "left":
+			if m.state == StateDetail {
+				var selectedHit *engine.Result
+				if m.selectedIndex >= 0 && m.selectedIndex < len(m.logLineHits) {
+					selectedHit = m.logLineHits[m.selectedIndex]
+				}
+				if selectedHit != nil && len(selectedHit.AuthRoles) > 1 {
+					m.detailAuthRoleIdx--
+					if m.detailAuthRoleIdx < 0 {
+						m.detailAuthRoleIdx = len(selectedHit.AuthRoles) - 1
+					}
+					m.updateDetailView()
+					return m, nil
+				}
+			}
+
+		case "right":
+			if m.state == StateDetail {
+				var selectedHit *engine.Result
+				if m.selectedIndex >= 0 && m.selectedIndex < len(m.logLineHits) {
+					selectedHit = m.logLineHits[m.selectedIndex]
+				}
+				if selectedHit != nil && len(selectedHit.AuthRoles) > 1 {
+					m.detailAuthRoleIdx++
+					if m.detailAuthRoleIdx >= len(selectedHit.AuthRoles) {
+						m.detailAuthRoleIdx = 0
+					}
+					m.updateDetailView()
+					return m, nil
+				}
 			}
 
 		case "down", "j":
@@ -4188,6 +4222,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "tab":
+			if m.state == StateDetail {
+				var selectedHit *engine.Result
+				if m.selectedIndex >= 0 && m.selectedIndex < len(m.logLineHits) {
+					selectedHit = m.logLineHits[m.selectedIndex]
+				}
+				if selectedHit != nil && len(selectedHit.AuthRoles) > 1 {
+					m.detailAuthRoleIdx++
+					if m.detailAuthRoleIdx >= len(selectedHit.AuthRoles) {
+						m.detailAuthRoleIdx = 0
+					}
+					m.updateDetailView()
+					return m, nil
+				}
+			}
 			if m.state == StateHexView {
 				m.toggleHexTarget()
 				return m, nil
@@ -4419,15 +4467,41 @@ func (m *Model) updateDetailView() {
 	var reqContent, resContent string
 
 	if selectedHit != nil {
+		reqSource := selectedHit.Request
+		resSource := selectedHit.Response
+		tabHeader := ""
+
+		if len(selectedHit.AuthRoles) > 1 {
+			var tabs []string
+			for i, ar := range selectedHit.AuthRoles {
+				if i == m.detailAuthRoleIdx {
+					tabs = append(tabs, highlightStyle.Render(fmt.Sprintf("[ %s ]", ar.Role)))
+				} else {
+					tabs = append(tabs, mutedStyle.Render(fmt.Sprintf("[ %s ]", ar.Role)))
+				}
+			}
+			tabHeader = strings.Join(tabs, " ") + "\n\n"
+			if m.detailAuthRoleIdx >= 0 && m.detailAuthRoleIdx < len(selectedHit.AuthRoles) {
+				reqSource = selectedHit.AuthRoles[m.detailAuthRoleIdx].Request
+				resSource = selectedHit.AuthRoles[m.detailAuthRoleIdx].Response
+			}
+		}
+
 		reqContent = "No raw request available. Use --save-raw to include raw request/response; set follow redirects or disable body filters if using HEAD."
+		if tabHeader != "" {
+			reqContent = tabHeader + reqContent
+		}
 		if selectedHit.MarkedInteresting {
 			reqContent = yellowStyle.Render("★ Marked interesting") + "\n\n" + reqContent
 		}
 		if selectedHit.Note != "" {
 			reqContent = selectedHit.Note + "\n\n" + reqContent
 		}
-		if selectedHit.Request != "" {
-			reqContent = selectedHit.Request
+		if reqSource != "" {
+			reqContent = reqSource
+			if tabHeader != "" {
+				reqContent = tabHeader + reqContent
+			}
 			if selectedHit.MarkedInteresting {
 				reqContent = yellowStyle.Render("★ Marked interesting") + "\n\n" + reqContent
 			}
@@ -4435,19 +4509,22 @@ func (m *Model) updateDetailView() {
 				reqContent = selectedHit.Note + "\n\n" + reqContent
 			}
 			if isBinaryString(reqContent) {
-				reqContent = fmt.Sprintf("[Binary request: %d bytes]\nUse --save-raw to persist to disk.", len(selectedHit.Request))
+				reqContent = fmt.Sprintf("[Binary request: %d bytes]\nUse --save-raw to persist to disk.", len(reqSource))
 			}
 		}
 
 		resContent = "No raw response available. Use --save-raw to include raw request/response."
+		if tabHeader != "" {
+			resContent = tabHeader + resContent
+		}
 		if selectedHit.MarkedInteresting {
 			resContent = yellowStyle.Render("★ Marked interesting") + "\n\n" + resContent
 		}
 		if selectedHit.Note != "" {
 			resContent = selectedHit.Note + "\n\n" + resContent
 		}
-		if selectedHit.Response != "" {
-			resContent = selectedHit.Response
+		if resSource != "" {
+			resContent = resSource
 			if selectedHit.MarkedInteresting {
 				resContent = yellowStyle.Render("★ Marked interesting") + "\n\n" + resContent
 			}
