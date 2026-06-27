@@ -96,6 +96,30 @@ func (f *fnvHash) Sum64() uint64 {
 	return f.state
 }
 
+func BenchmarkSimhashBodyOld(b *testing.B) {
+	body := []byte("hello world this is a test with a lot of words to ensure we have a realistic benchmark scenario.")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		originalSimhashBody(body)
+	}
+}
+
+func BenchmarkSimhashTracker(b *testing.B) {
+	tracker := NewSimhashTracker(3, 100)
+	hashes := []uint64{
+		0x1234567890abcdef,
+		0x1234567890abcdee,
+		0x1234567890abcded,
+		0xfedcba0987654321,
+		0xfedcba0987654320,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hash := hashes[i%len(hashes)]
+		tracker.IsSoftFour(hash)
+	}
+}
+
 func BenchmarkSimhashBodyNew(b *testing.B) {
 	body := []byte("hello world this is a test with a lot of words to ensure we have a realistic benchmark scenario.")
 	b.ResetTimer()
