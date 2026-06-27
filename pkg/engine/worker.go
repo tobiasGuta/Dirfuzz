@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"dirfuzz/pkg/httpclient"
@@ -9,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -847,13 +845,13 @@ func (e *Engine) worker(id int) {
 
 		if !strings.EqualFold(successfulMethod, "HEAD") {
 			recSig := makeRecursiveResponseSignature(resp.StatusCode, bodySize, wordCount, lineCount, contentType, bodyHash)
-			if job.Depth > 0 && e.isRecursiveMirror(payload, recSig) {
+			if job.Depth > 0 && e.recursiveTracker.IsMirror(payload, recSig) {
 				if e.cleanupJob(shouldExit) {
 					return
 				}
 				continue
 			}
-			e.rememberRecursiveSignature(payload, recSig)
+			e.recursiveTracker.RememberSignature(payload, recSig)
 		}
 
 		paramFuzzURL := fullURL
@@ -932,80 +930,12 @@ func (e *Engine) worker(id int) {
 
 		// Recursive scanning with bounded concurrency.
 		if doRecurse && depth < maxDepth {
-			if doRecursivePrune {
-				if prune, reason := shouldPruneRecursiveBranch(payload, contentType, resp.Body); prune {
-					e.emitLogEvent(LogLevelInfo, LogCategoryDiscovery, EventRecursivePruned, "recursive branch pruned", map[string]interface{}{
-						"path":   payload,
-						"reason": reason,
-					})
-					e.activeJobs.Done()
-					if shouldExit {
-						return
-					}
-					continue
+			if pruned := e.recursiveTracker.ProcessHit(job, result, resp, payload, depth, maxDepth, wordlistPath, doRecursivePrune); pruned {
+				e.activeJobs.Done()
+				if shouldExit {
+					return
 				}
-			}
-			inScope := true
-			if result.Redirect != "" {
-				if parsedRedir, err := url.Parse(result.Redirect); err == nil && parsedRedir.Host != "" {
-					e.targetLock.RLock()
-					scopeDom := e.scopeDomain
-					e.targetLock.RUnlock()
-					redirHost := parsedRedir.Hostname()
-					if redirHost != scopeDom && !strings.HasSuffix(redirHost, "."+scopeDom) {
-						inScope = false
-					}
-				}
-			}
-			if inScope {
-				// Perform the wildcard check asynchronously so the worker isn't
-				// blocked performing network IO. If the path is not a
-				// wildcard and a semaphore slot is available, spawn the
-				// recursive scanner.
-				go func(runID int64, basePath string, nextDepth int, wlPath string) {
-					if e.checkRecursiveWildcard(basePath) {
-						return
-					}
-
-					// Acquire semaphore slot (non-blocking to avoid stalling).
-					select {
-					case e.recursiveSem <- struct{}{}:
-						e.AddScanner()
-						go func(runID int64, basePath string, nextDepth int, wlPath string) {
-							defer e.scannerWg.Done()
-							defer func() { <-e.recursiveSem }()
-
-							snap := e.configSnap.Load()
-							if snap == nil {
-								return
-							}
-
-							f, err := os.Open(wlPath)
-							if err != nil {
-								return
-							}
-							defer f.Close()
-
-							scanner := bufio.NewScanner(f)
-							for scanner.Scan() {
-								word := scanner.Text()
-								if word == "" {
-									continue
-								}
-								newPath := strings.TrimSuffix(basePath, "/") + "/" + strings.TrimPrefix(word, "/")
-								if pathExcludedByRegexps(newPath, snap.ExcludePathRegexps) {
-									continue
-								}
-								for _, method := range resolveMethodsForPath(newPath, snap.Methods, snap.SmartAPI) {
-									atomic.AddInt64(&e.TotalLines, 1)
-									e.Submit(Job{Path: newPath, Depth: nextDepth, Method: method, RunID: runID})
-								}
-							}
-						}(runID, basePath, nextDepth, wlPath)
-					default:
-						// Semaphore full; skip recursive scan for this hit.
-					}
-				}(job.RunID, payload, depth+1, wordlistPath)
+				continue
 			}
 		}
 

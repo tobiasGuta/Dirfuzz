@@ -131,22 +131,22 @@ func TestRecursiveMirrorDetectionSuppressesRepeatedResponses(t *testing.T) {
 	sig := makeRecursiveResponseSignature(200, 65, 1, 1, "application/json", 0x1234)
 	otherSig := makeRecursiveResponseSignature(200, 66, 1, 1, "application/json", 0x1234)
 
-	eng.rememberRecursiveSignature("api", sig)
-	eng.rememberRecursiveSignature("api/user", sig)
+	eng.recursiveTracker.RememberSignature("api", sig)
+	eng.recursiveTracker.RememberSignature("api/user", sig)
 
-	if !eng.isRecursiveMirror("api/api", sig) {
+	if !eng.recursiveTracker.IsMirror("api/api", sig) {
 		t.Fatal("expected repeated API root response to be treated as a recursive mirror")
 	}
-	if !eng.isRecursiveMirror("api/user/api", sig) {
+	if !eng.recursiveTracker.IsMirror("api/user/api", sig) {
 		t.Fatal("expected child that mirrors its parent API response to be suppressed")
 	}
-	if !eng.isRecursiveMirror("api/api/user", sig) {
+	if !eng.recursiveTracker.IsMirror("api/api/user", sig) {
 		t.Fatal("expected collapsed duplicate segment to match canonical API sibling")
 	}
-	if eng.isRecursiveMirror("api/jobs", otherSig) {
+	if eng.recursiveTracker.IsMirror("api/jobs", otherSig) {
 		t.Fatal("first-level API child with a different response should not be treated as a recursive mirror")
 	}
-	if eng.isRecursiveMirror("api/user/api", otherSig) {
+	if eng.recursiveTracker.IsMirror("api/user/api", otherSig) {
 		t.Fatal("different response signatures should remain visible")
 	}
 }
