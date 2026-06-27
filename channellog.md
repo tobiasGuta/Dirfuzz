@@ -148,6 +148,12 @@ go test ./cmd/monitor
 
 ## Historical Updates
 
+### 2026-06-27
+
+- Implemented Passive Tech-Stack Aware Fingerprinting to identify technologies (e.g., Spring Boot, PHP, nginx) via headers, cookies, and bodies without extra network requests during fuzzing.
+- Wired the fingerprinter directly into the Worker Loop, utilizing zero-allocation cookie parsing, and tracking findings safely alongside WAF evasion techniques.
+- Configured tech detections to append to the immutable Event Ledger with the `TECH:` label prefix.
+
 ### 2026-05-27
 
 - Added a native Nuclei Orchestrator Subprocess. When `--nuclei` is passed, DirFuzz streams discovered URLs directly into Nuclei's `stdin` via a dedicated subprocess.
