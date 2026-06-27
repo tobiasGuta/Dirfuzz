@@ -8,6 +8,7 @@ This file is the single place for update notes and changelog entries.
 - **AuthMatrix Logic Fix**: Resolved a critical engine bug where explicitly specifying `-m GET` via CLI overrode the entire AuthMatrix (`--auth`) evaluation logic, silently falling back to unauthenticated single-requests. 
 - **Tabbed Identity Inspection**: Overhauled the `StateDetail` view in the TUI (`pkg/tui/tui.go`) to display a tabbed interface for AuthMatrix results (`[ mobilecookie ] [ privatecookie ]`). Added dynamic hot-swapping using `Left`, `Right`, and `Tab` keys to effortlessly cycle and inspect the precise raw request/response byte slices corresponding to each evaluated identity.
 - **WAF Concurrency Bypasses**: Altered the engine's AuthMatrix execution loop (`executeAuthMatrixRequests`) to fire credential permutations sequentially rather than concurrently, mitigating aggressive rate-limiting WAF blocks and false 403s on distributed targets (like Cloudflare).
+- **Completion Webhook**: Integrated a lightweight completion notification hook into the engine. When the `DISCORD_WEBHOOK` environment variable is present, DirFuzz will fire an asynchronous, silent JSON ping to the webhook the exact millisecond the wordlist scan finishes, completely independent of the TUI remaining open.
 
 
 ### Phase 7.5: Architecture Hardening

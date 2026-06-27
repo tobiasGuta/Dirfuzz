@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -382,6 +383,20 @@ func runPlain(eng *engine.Engine, cfg cliConfig, writeResult func(engine.Result)
 		)
 	}
 
+	if webhook := os.Getenv("DISCORD_WEBHOOK"); strings.TrimSpace(webhook) != "" {
+		target := cfg.Target
+		if target == "" {
+			target = "target"
+		}
+		payload := fmt.Sprintf(`{"content": "✅ **DirFuzz** scan complete on `+"`%s`"+`"}`, target)
+		req, _ := http.NewRequest(http.MethodPost, strings.TrimSpace(webhook), strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 5 * time.Second}
+		if _, err := client.Do(req); err != nil {
+			fmt.Fprintf(os.Stderr, "[!] Failed to send completion webhook: %v\n", err)
+		}
+	}
+
 	return collectedResults, nil
 }
 
@@ -437,6 +452,24 @@ func runTUI(eng *engine.Engine, cfg cliConfig, writeResult func(engine.Result), 
 		// When eng.Results is closed, unblock the TUI so it can exit.
 		close(tuiCh)
 		close(logEventCh)
+	}()
+
+	// Fire completion webhook immediately when engine is done, without waiting for TUI close.
+	go func() {
+		eng.Wait()
+		if webhook := os.Getenv("DISCORD_WEBHOOK"); strings.TrimSpace(webhook) != "" {
+			target := cfg.Target
+			if target == "" {
+				target = "target"
+			}
+			payload := fmt.Sprintf(`{"content": "✅ **DirFuzz** scan complete on `+"`%s`"+`"}`, target)
+			req, _ := http.NewRequest(http.MethodPost, strings.TrimSpace(webhook), strings.NewReader(payload))
+			req.Header.Set("Content-Type", "application/json")
+			client := &http.Client{Timeout: 5 * time.Second}
+			if _, err := client.Do(req); err != nil {
+				fmt.Fprintf(os.Stderr, "[!] Failed to send completion webhook: %v\n", err)
+			}
+		}
 	}()
 
 	model := tui.NewModel(eng, tuiCh, logEventCh)

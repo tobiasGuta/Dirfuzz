@@ -71,6 +71,8 @@ dirfuzz-metrics-*.json
 *.url
 /scans/
 scans/
+/findings/
+findings/
 state.jsonl
 results.jsonl
 
