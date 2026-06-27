@@ -3,6 +3,7 @@ package engine
 import (
 	"hash/fnv"
 	"math/bits"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -78,4 +79,68 @@ func hashToken(token []byte, vector *[64]int) {
 
 func hammingDistance(a, b uint64) int {
 	return bits.OnesCount64(a ^ b)
+}
+
+// SimhashTracker manages SimHash-based soft-404 clustering.
+type SimhashTracker struct {
+	clusters     map[uint64]int
+	clusterLock  sync.Mutex
+	Threshold    int
+	ClusterLimit int
+}
+
+// NewSimhashTracker creates a new SimhashTracker.
+func NewSimhashTracker(threshold, limit int) *SimhashTracker {
+	return &SimhashTracker{
+		clusters:     make(map[uint64]int),
+		Threshold:    threshold,
+		ClusterLimit: limit,
+	}
+}
+
+// Clear resets the cluster map.
+func (s *SimhashTracker) Clear() {
+	s.clusterLock.Lock()
+	s.clusters = make(map[uint64]int)
+	s.clusterLock.Unlock()
+}
+
+// IsSoftFour tracks a SimHash cluster and returns true once the cluster
+// has reached the suppression limit.
+func (s *SimhashTracker) IsSoftFour(bodyHash uint64) bool {
+	threshold := s.Threshold
+	if threshold < 0 {
+		threshold = 0
+	}
+	limit := s.ClusterLimit
+	if limit <= 0 {
+		return false
+	}
+
+	s.clusterLock.Lock()
+	defer s.clusterLock.Unlock()
+
+	for centroid, count := range s.clusters {
+		if hammingDistance(centroid, bodyHash) <= threshold {
+			count++
+			s.clusters[centroid] = count
+			return count >= limit
+		}
+	}
+
+	const maxSimhashCentroids = 5000
+	if len(s.clusters) >= maxSimhashCentroids {
+		var lowestCentroid uint64
+		lowestCount := int(1e9)
+		for centroid, count := range s.clusters {
+			if count < lowestCount {
+				lowestCount = count
+				lowestCentroid = centroid
+			}
+		}
+		delete(s.clusters, lowestCentroid)
+	}
+
+	s.clusters[bodyHash] = 1
+	return false
 }

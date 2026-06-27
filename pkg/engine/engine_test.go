@@ -271,12 +271,13 @@ func TestExecuteAuthMatrixRequestsDetectsPrivilegeEscalation(t *testing.T) {
 		t.Fatal("expected config snapshot")
 	}
 
-	resp, rawReq, method, finding, err := eng.executeAuthMatrixRequests(
+	resp, rawReq, method, finding, _, err := eng.executeAuthMatrixRequests(
 		context.Background(),
 		server.URL,
 		"/admin",
 		"example.com",
 		"DirFuzz/2.0",
+		"GET",
 		map[string]string{},
 		DefaultHTTPTimeout,
 		"",
@@ -439,19 +440,19 @@ func TestDiscoverParamHitsBisectsHiddenParameters(t *testing.T) {
 
 func TestSimhashSoft404Clustering(t *testing.T) {
 	eng := NewEngine(1, 100, 0.01)
-	eng.SimhashThreshold = 3
-	eng.SimhashClusterLimit = 2
+	eng.simhashTracker.Threshold = 3
+	eng.simhashTracker.ClusterLimit = 2
 
-	if eng.isSimhashSoftFour(0x1234567890abcdef) {
+	if eng.simhashTracker.IsSoftFour(0x1234567890abcdef) {
 		t.Fatal("first cluster member should not be suppressed")
 	}
-	if !eng.isSimhashSoftFour(0x1234567890abcdee) {
+	if !eng.simhashTracker.IsSoftFour(0x1234567890abcdee) {
 		t.Fatal("second close cluster member should be suppressed at the limit")
 	}
-	if !eng.isSimhashSoftFour(0x1234567890abcded) {
+	if !eng.simhashTracker.IsSoftFour(0x1234567890abcded) {
 		t.Fatal("subsequent close cluster member should stay suppressed")
 	}
-	if eng.isSimhashSoftFour(0xfedcba0987654321) {
+	if eng.simhashTracker.IsSoftFour(0xfedcba0987654321) {
 		t.Fatal("distant hash should start a fresh cluster")
 	}
 }

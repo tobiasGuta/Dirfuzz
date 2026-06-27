@@ -577,13 +577,8 @@ type Engine struct {
 	fpCounts           map[string]int
 	manualFilterSizes  map[int]bool
 	autoFilterSizes    map[int]bool
-	simhashClusters    map[uint64]int
-	simhashClusterLock sync.Mutex
+	simhashTracker     *SimhashTracker
 	evasionAttempted   sync.Map
-
-	// SimHash soft-404 clustering settings.
-	SimhashThreshold    int
-	SimhashClusterLimit int
 	EvasionScoreboard   *EvasionScoreboard
 	wafStateMu          sync.RWMutex
 	wafDetected         bool
@@ -1056,7 +1051,7 @@ func NewEngine(numWorkers int, expectedItems uint, falsePositiveRate float64) *E
 		fpCounts:          make(map[string]int),
 		manualFilterSizes: make(map[int]bool),
 		autoFilterSizes:   make(map[int]bool),
-		simhashClusters:   make(map[uint64]int),
+		simhashTracker:    NewSimhashTracker(DefaultSimhashThreshold, DefaultSimhashClusterLimit),
 		EvasionScoreboard: NewEvasionScoreboard(),
 		lastTick:          time.Now().UnixNano(),
 		autoThrottle:      true,
@@ -1470,8 +1465,8 @@ func (e *Engine) buildAndStoreConfigSnapshot() {
 	copy(s.Extensions, e.Config.Extensions)
 	s.ParamWordlist = append(s.ParamWordlist, e.Config.ParamWordlist...)
 	e.Config.RUnlock()
-	e.SimhashThreshold = s.SimhashThreshold
-	e.SimhashClusterLimit = s.SimhashClusterLimit
+	e.simhashTracker.Threshold = s.SimhashThreshold
+	e.simhashTracker.ClusterLimit = s.SimhashClusterLimit
 
 	e.configSnap.Store(s)
 }
@@ -1663,51 +1658,7 @@ func (e *Engine) clearAutoFilterSizes() {
 	e.buildAndStoreConfigSnapshot()
 }
 
-func (e *Engine) clearSimhashClusters() {
-	e.simhashClusterLock.Lock()
-	e.simhashClusters = make(map[uint64]int)
-	e.simhashClusterLock.Unlock()
-}
 
-// isSimhashSoftFour tracks a SimHash cluster and returns true once the cluster
-// has reached the suppression limit.
-func (e *Engine) isSimhashSoftFour(bodyHash uint64) bool {
-	threshold := e.SimhashThreshold
-	if threshold < 0 {
-		threshold = 0
-	}
-	limit := e.SimhashClusterLimit
-	if limit <= 0 {
-		return false
-	}
-
-	e.simhashClusterLock.Lock()
-	defer e.simhashClusterLock.Unlock()
-
-	for centroid, count := range e.simhashClusters {
-		if hammingDistance(centroid, bodyHash) <= threshold {
-			count++
-			e.simhashClusters[centroid] = count
-			return count >= limit
-		}
-	}
-
-	const maxSimhashCentroids = 5000
-	if len(e.simhashClusters) >= maxSimhashCentroids {
-		var lowestCentroid uint64
-		lowestCount := int(1e9)
-		for centroid, count := range e.simhashClusters {
-			if count < lowestCount {
-				lowestCount = count
-				lowestCentroid = centroid
-			}
-		}
-		delete(e.simhashClusters, lowestCentroid)
-	}
-
-	e.simhashClusters[bodyHash] = 1
-	return false
-}
 
 func (e *Engine) AddMatchCode(code int) {
 	e.Config.Lock()
@@ -1932,7 +1883,8 @@ func (e *Engine) ChangeWordlist(path string) error {
 	e.fpCounts = make(map[string]int)
 	e.fpMutex.Unlock()
 	e.clearAutoFilterSizes()
-	e.clearSimhashClusters()
+	e.simhashTracker.Clear()
+
 	atomic.StoreInt64(&e.AutoFilterSuppressed, 0)
 	atomic.StoreInt64(&e.SimhashSuppressed, 0)
 
@@ -3217,7 +3169,7 @@ func (e *Engine) applyFilters(
 		}
 	}
 	// 9. SimHash soft-404 clustering.
-	if e.isSimhashSoftFour(bodyHash) {
+	if e.simhashTracker.IsSoftFour(bodyHash) {
 		atomic.AddInt64(&e.SimhashSuppressed, 1)
 		e.emitLogEvent(LogLevelWarning, LogCategoryFilter, EventSimhashCluster, fmt.Sprintf("simhash cluster suppressed body hash %x", bodyHash), map[string]interface{}{
 			"body_hash": bodyHash,
