@@ -1,8 +1,6 @@
 module dirfuzz
 
-go 1.25.0
-
-toolchain go1.26.4
+go 1.24.2
 
 require (
 	github.com/andybalholm/brotli v1.2.1

@@ -2,6 +2,14 @@
 
 This file is the single place for update notes and changelog entries.
 
+### Engine Refactoring & Maintenance Updates
+- **Massive Engine Decoupling**: Refactored the core `pkg/engine/engine.go` (~4200 lines) across three phases to drastically improve maintainability:
+  - Extracted the SimHash state and deduplication logic exactly as-is into `pkg/engine/simhash.go`, utilizing a new `SimhashTracker` interface.
+  - Safely moved the `worker(id int)` core loop into `pkg/engine/worker.go`.
+  - Extracted the highly tangled recursive scan branch pruning and mirror checking logic into `pkg/engine/recursive.go` alongside a new `RecursiveTracker` interface in `pkg/engine/recursive_tracker.go`.
+- **Go Module Update**: Updated `go.mod` to use `go 1.24.2` to resolve compatibility issues and unblock users.
+- **Gitignore Update**: Added the `findings/` directory to `.gitignore` to prevent committing raw scan outputs.
+
 ## Bug Bounty OS & Intelligence Architecture
 
 ### TUI & AuthMatrix Enhancements

@@ -18,6 +18,7 @@ wordlists/common.txt
 
 # Go build artifacts
 *.test
+findings/
 *.out
 *.exe
 *.dll
