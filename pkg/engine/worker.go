@@ -538,6 +538,28 @@ func (e *Engine) worker(id int) {
 		}
 
 		bodySize, wordCount, lineCount, contentType, bodyHash := computeResponseMetrics(resp, successfulMethod)
+
+		// ─── Passive Tech Fingerprinting ──────────────────────────────────────────
+		// Runs on every 2xx/3xx response. Uses resp.HeaderMap (already allocated by
+		// the HTTP client for source-map harvesting) so zero extra allocation cost.
+		// Deduplication via detectedTech sync.Map prevents log flooding.
+		var detectedTechs []string
+		if resp.StatusCode >= 200 && resp.StatusCode < 400 && len(resp.Body) > 0 {
+		    cookies := parseCookiesFromRawHeaders(resp.Headers)
+		    detectedTechs = e.fingerprinter.Detect(resp.HeaderMap, cookies, resp.Body)
+		    for _, tech := range detectedTechs {
+		        dedupeKey := reqHostname + ":" + tech
+		        if _, loaded := e.detectedTech.LoadOrStore(dedupeKey, true); !loaded {
+		            // Emit once per host per scan to the TUI and Monitor
+		            e.emitLogEvent(LogLevelSuccess, LogCategoryDiscovery, "TechDetected",
+		                fmt.Sprintf("Identified tech stack %q on %s", tech, reqHostname),
+		                map[string]interface{}{"host": reqHostname, "tech": tech})
+		        }
+		    }
+		}
+		// [FUTURE] Tech-aware wordlist injection:
+		// e.queueTechWordlist(tech) — loads wordlists/spring-boot.txt etc into the scan queue
+
 		skipRTFilters := timingOracleHit
 
 		// Apply all filters.
@@ -807,6 +829,12 @@ func (e *Engine) worker(id int) {
 		}
 		if bypassTechniqueLabel != "" {
 			result.Labels = append(result.Labels, bypassTechniqueLabel)
+		}
+
+		// Append tech detections — immortalizes findings in the immutable Event Ledger
+		// Format: "TECH:nginx", "TECH:PHP" etc. Survives time-travel replay natively.
+		for _, tech := range detectedTechs {
+		    result.Labels = append(result.Labels, "TECH:"+tech)
 		}
 
 		// Eagle mode compares the current hit against the previous JSONL baseline.
@@ -1090,4 +1118,20 @@ func (e *Engine) SubmitHarvestPath(path string, runID int64, harvestDepth int, p
 			CreatedAt:       action.CreatedAt,
 		})
 	}
+}
+
+// parseCookiesFromRawHeaders extracts cookie names from raw HTTP response headers
+// without relying on net/http parsing which requires a non-nil Request pointer.
+// Returns a map of cookie name -> "true" suitable for fingerprint.Detect().
+func parseCookiesFromRawHeaders(rawHeaders string) map[string]string {
+	cookies := make(map[string]string)
+	for _, line := range strings.Split(strings.ReplaceAll(rawHeaders, "\r\n", "\n"), "\n") {
+		if strings.HasPrefix(strings.ToLower(line), "set-cookie:") {
+			parts := strings.SplitN(line[11:], "=", 2)
+			if len(parts) == 2 {
+				cookies[strings.TrimSpace(parts[0])] = "true"
+			}
+		}
+	}
+	return cookies
 }

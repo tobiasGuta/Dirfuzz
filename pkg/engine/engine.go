@@ -27,6 +27,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"dirfuzz/pkg/fingerprint"
 	"dirfuzz/pkg/httpclient"
 	"dirfuzz/pkg/netutil"
 
@@ -518,6 +519,10 @@ type Engine struct {
 	Results       chan Result
 	LogEvents     chan LogEvent
 
+	// Passive Tech Fingerprinting
+	fingerprinter *fingerprint.Fingerprinter
+	detectedTech  sync.Map // Keyed by "hostname:tech" — prevents log flooding per host
+
 	// Nuclei Subprocess Integration
 	nucleiCmd   *exec.Cmd
 	nucleiStdin io.WriteCloser
@@ -830,6 +835,7 @@ func NewEngine(numWorkers int, expectedItems uint, falsePositiveRate float64) *E
 		limiters:      make(map[string]*rate.Limiter),
 		currentLimit:  rate.Inf,
 		currentBurst:  burst,
+		fingerprinter: fingerprint.NewFingerprinter(),
 		Config: &Config{
 			UserAgent:           "DirFuzz/2.0",
 			Headers:             make(map[string]string),
