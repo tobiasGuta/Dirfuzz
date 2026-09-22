@@ -6,7 +6,7 @@ import (
 )
 
 // CalculateDecayedWeight applies the exponential decay formula based on age
-// Weight = OriginalWeight * e^(-ageDays / HalfLifeDays)
+// Weight = OriginalWeight * 2^(-ageDays / HalfLifeDays); preserve rejection penalties.
 func CalculateDecayedWeight(decay KnowledgeDecay, now time.Time, originalWeight float64) float64 {
 	// If the half life is zero or negative, do not decay (infinite)
 	if decay.HalfLifeDays <= 0 {
@@ -23,13 +23,13 @@ func CalculateDecayedWeight(decay KnowledgeDecay, now time.Time, originalWeight 
 	}
 
 	// Calculate decay multiplier
-	multiplier := math.Exp(-ageDays / float64(decay.HalfLifeDays))
+	multiplier := math.Exp(-math.Ln2 * ageDays / float64(decay.HalfLifeDays))
 	
 	newWeight := originalWeight * multiplier
 
-	// Adjust based on LastObserved. If it was recently observed but not confirmed,
-	// maybe it doesn't drop below the MinWeight.
-	if newWeight < decay.MinWeight {
+	// Only positive evidence uses a positive minimum. Never turn rejected
+	// evidence (a negative weight) or a zero-weight observation into a boost.
+	if originalWeight > 0 && decay.MinWeight > 0 && newWeight < decay.MinWeight {
 		return decay.MinWeight
 	}
 
