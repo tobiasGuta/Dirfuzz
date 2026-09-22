@@ -39,3 +39,5 @@ jobs:
           cache: true
       - name: Focused race tests
         run: go test -race ./pkg/engine ./pkg/httpclient -timeout=10m
+      - name: Intelligence and MCP race tests
+        run: go test -race ./pkg/knowledge ./pkg/campaign ./cmd/mcp -timeout=10m
