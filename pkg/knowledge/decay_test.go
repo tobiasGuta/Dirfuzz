@@ -13,12 +13,12 @@ func TestKnowledgeDecayHalfLife(t *testing.T) {
 		MinWeight:     10.0,
 	}
 
-	// 180 days age = 2 half lives. e^(-2) = ~0.135
+	// 180 days age = 2 half lives. 2^(-2) = 0.25
 	originalWeight := 100.0
 	current := CalculateDecayedWeight(decay, time.Now(), originalWeight)
 
-	if current > 14.0 || current < 13.0 {
-		t.Fatalf("Decay weight math incorrect, got %f expected ~13.5", current)
+	if current > 25.1 || current < 24.9 {
+		t.Fatalf("Decay weight math incorrect, got %f expected ~25", current)
 	}
 }
 
@@ -32,5 +32,17 @@ func TestKnowledgeDecayMinWeight(t *testing.T) {
 	current := CalculateDecayedWeight(decay, time.Now(), 100.0)
 	if current != 5.0 {
 		t.Fatalf("Decay failed to respect min weight, got %f expected 5.0", current)
+	}
+}
+
+func TestKnowledgeDecayNeverTurnsRejectionIntoBoost(t *testing.T) {
+	at := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
+	decay := KnowledgeDecay{LastConfirmed: at.Add(-30 * 24 * time.Hour), HalfLifeDays: 30, MinWeight: 5}
+
+	if got := CalculateDecayedWeight(decay, at, -10); got < -5.01 || got > -4.99 {
+		t.Fatalf("negative weight after one half-life = %f, want -5", got)
+	}
+	if got := CalculateDecayedWeight(decay, at, 0); got != 0 {
+		t.Fatalf("zero evidence became positive: %f", got)
 	}
 }
