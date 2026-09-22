@@ -1,6 +1,8 @@
 package campaign
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 )
@@ -18,7 +20,14 @@ type DiffEngine interface {
 type DefaultDiffEngine struct{}
 
 func computeDiffHash(oldNode, newNode EvidenceProjection) string {
-	return fmt.Sprintf("diff-%s-%d-%d", newNode.Path, oldNode.RiskScore, newNode.RiskScore)
+	// Hash the full transition rather than only the risk score: two independent
+	// changes on the same path must not share a diff-memory fingerprint.
+	pair := struct {
+		Old EvidenceProjection `json:"old"`
+		New EvidenceProjection `json:"new"`
+	}{Old: oldNode, New: newNode}
+	encoded, _ := json.Marshal(pair) // EvidenceProjection has only JSON-safe fields.
+	return fmt.Sprintf("diff-%x", sha256.Sum256(encoded))
 }
 
 func (e *DefaultDiffEngine) Compare(snapOld CampaignSnapshot, snapNew CampaignSnapshot) CampaignDiff {
@@ -104,21 +113,68 @@ func detectChanges(oldNode, newNode EvidenceProjection) ([]ChangeReason, DiffSev
 	var reasons []ChangeReason
 	severity := DiffInfo
 
+	if oldNode.StatusCode != newNode.StatusCode {
+		reasons = append(reasons, ChangeReason{
+			Type: StatusChanged,
+			Before: fmt.Sprintf("%d", oldNode.StatusCode),
+			After: fmt.Sprintf("%d", newNode.StatusCode),
+		})
+		severity = DiffInteresting
+		// A previously protected endpoint becoming successful is an auth
+		// boundary regression worth escalating independently of any risk score.
+		if (oldNode.StatusCode == 401 || oldNode.StatusCode == 403) &&
+			newNode.StatusCode >= 200 && newNode.StatusCode < 300 {
+			reasons = append(reasons, ChangeReason{
+				Type: AuthChanged,
+				Before: fmt.Sprintf("%d", oldNode.StatusCode),
+				After: fmt.Sprintf("%d", newNode.StatusCode),
+			})
+			severity = DiffCritical
+		}
+	}
+	if oldNode.Size != newNode.Size {
+		reasons = append(reasons, ChangeReason{
+			Type: SizeChanged,
+			Before: fmt.Sprintf("%d", oldNode.Size),
+			After: fmt.Sprintf("%d", newNode.Size),
+		})
+		if severity == DiffInfo {
+			severity = DiffInteresting
+		}
+	}
+	if oldNode.ContentType != newNode.ContentType {
+		reasons = append(reasons, ChangeReason{
+			Type: ContentTypeChanged,
+			Before: oldNode.ContentType,
+			After: newNode.ContentType,
+		})
+		if severity == DiffInfo {
+			severity = DiffInteresting
+		}
+	}
+	if oldNode.Hash != "" && newNode.Hash != "" && oldNode.Hash != newNode.Hash {
+		reasons = append(reasons, ChangeReason{
+			Type: BodyHashChanged,
+			Before: oldNode.Hash,
+			After: newNode.Hash,
+		})
+		if severity == DiffInfo {
+			severity = DiffInteresting
+		}
+	}
 	if oldNode.RiskScore != newNode.RiskScore {
 		reasons = append(reasons, ChangeReason{
-			Type:   StatusChanged,
-			Before: fmt.Sprintf("Score:%d", oldNode.RiskScore),
-			After:  fmt.Sprintf("Score:%d", newNode.RiskScore),
+			Type: RiskChanged,
+			Before: fmt.Sprintf("%d", oldNode.RiskScore),
+			After: fmt.Sprintf("%d", newNode.RiskScore),
 		})
-		
 		diffAmt := newNode.RiskScore - oldNode.RiskScore
 		if diffAmt < 0 {
 			diffAmt = -diffAmt
 		}
-		
 		if diffAmt > 50 {
 			severity = DiffCritical
-		} else {
+		} else if severity == DiffInfo {
 			severity = DiffInteresting
 		}
 	}
