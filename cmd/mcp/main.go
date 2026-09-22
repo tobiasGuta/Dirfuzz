@@ -2590,7 +2590,15 @@ func handleExpand(ctx context.Context, req mcp.CallToolRequest, cfg mcpConfig) (
 
 	expansions := make([]expansionOutputItem, 0, len(candidates))
 	for _, c := range candidates {
-		subTarget := strings.TrimRight(baseTarget, "/") + c.result.Path
+		subTarget, err := resolveProbeTarget(baseTarget, c.result.Path)
+		if err != nil {
+			expansions = append(expansions, expansionOutputItem{SourcePath: c.result.Path, Error: err.Error()})
+			continue
+		}
+		if allowed, reason := scope.IsAllowed(subTarget, assets); !allowed {
+			expansions = append(expansions, expansionOutputItem{SourcePath: c.result.Path, Error: "expansion target blocked by scope validator: " + reason})
+			continue
+		}
 		subResults, err := func() ([]engine.Result, error) {
 			subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
