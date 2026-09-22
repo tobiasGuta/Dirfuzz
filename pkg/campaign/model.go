@@ -14,10 +14,13 @@ type EvidenceProjection struct {
 type ChangeReasonType string
 
 const (
-	StatusChanged ChangeReasonType = "STATUS_CHANGED"
-	AuthChanged   ChangeReasonType = "AUTH_CHANGED"
-	SizeChanged   ChangeReasonType = "SIZE_CHANGED"
-	NewFinding    ChangeReasonType = "NEW_FINDING"
+	StatusChanged      ChangeReasonType = "STATUS_CHANGED"
+	AuthChanged        ChangeReasonType = "AUTH_CHANGED"
+	SizeChanged        ChangeReasonType = "SIZE_CHANGED"
+	ContentTypeChanged ChangeReasonType = "CONTENT_TYPE_CHANGED"
+	BodyHashChanged    ChangeReasonType = "BODY_HASH_CHANGED"
+	RiskChanged        ChangeReasonType = "RISK_CHANGED"
+	NewFinding         ChangeReasonType = "NEW_FINDING"
 )
 
 type ChangeReason struct {
