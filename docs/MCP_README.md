@@ -2,7 +2,7 @@
 
 DirFuzz features an embedded **MCP (Model Context Protocol)** server binary (`cmd/mcp`). This server exposes two read-only resources, `dirfuzz://wordlists` and `dirfuzz://scope`, three workflow prompts, and ten tools (`dirfuzz_scan`, `dirfuzz_scan_status`, `dirfuzz_cancel`, `dirfuzz_list_scope`, `dirfuzz_waf_probe`, `dirfuzz_param_fuzz`, `dirfuzz_auth_test`, `dirfuzz_analyze`, `dirfuzz_build_scan`, and `dirfuzz_expand`) so AI assistants (Claude, Copilot) can plan scans with live context before they act.
 
-The MCP server wraps DirFuzz's high-performance engine in an iron-clad vulnerability sandboxing model, strictly validating target definitions and restricting AI path traversal capabilities to secure your environment.
+The MCP server adds scoped execution controls around the scanner. These are defense-in-depth checks, not an operating-system sandbox or a substitute for authorizing the target and reviewing requested operations.
 
 ---
 
@@ -10,9 +10,10 @@ The MCP server wraps DirFuzz's high-performance engine in an iron-clad vulnerabi
 
 The MCP layer is built for authorized use only and applies layered guardrails:
 - **Scope enforcement**: `dirfuzz_scan` reloads the live scope files from `DIRFUZZ_SCOPE_DIR` and blocks any target that does not match an in-scope asset.
+- **Follow-on origin binding**: probe URLs must remain on the initial scan's scheme, hostname, and effective port; expansion destinations are revalidated against loaded scope. Redirect-chain behavior should still be verified against each program's exact authorization rules.
 - **Path traversal prevention**: wordlist, results, and scope file paths are resolved inside their allowed directories before any file is read.
 - **Rate limiting**: each tool call is checked against a sliding-window limiter, and scan concurrency is capped by the MCP registry.
-- **Audit logging**: every tool invocation is appended to a JSONL audit log at `DIRFUZZ_AUDIT_LOG` with bearer tokens redacted from header-like arguments.
+- **Audit logging**: every tool invocation is appended to a JSONL audit log at `DIRFUZZ_AUDIT_LOG` with approved argument names and non-string scalar metadata. Raw URLs, headers, bodies, authentication matrices, and other string values are redacted rather than persisted.
 - **Output bounding**: scan results are capped by `DIRFUZZ_MAX_RESULTS`, and large follow-on operations are exposed as separate tools so agents can make smaller, deliberate steps.
 
 ---
