@@ -1380,27 +1380,20 @@ func parseOptionalHeaderArgs(req mcp.CallToolRequest) (map[string]string, error)
 	return parseHeaders(rawHeaders)
 }
 
+// sanitizeAuditArguments records only approved field names and safe scalar metadata.
+// Request URLs, headers, bodies, auth matrices, and unknown values may contain
+// credentials in arbitrary formats; never persist their raw values to the audit log.
 func sanitizeAuditArguments(raw any) any {
 	switch v := raw.(type) {
 	case nil:
 		return nil
-	case string:
-		return redactBearerTokens(v)
-	case []any:
-		out := make([]any, 0, len(v))
-		for _, item := range v {
-			out = append(out, sanitizeAuditArguments(item))
-		}
-		return out
-	case []string:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			out = append(out, redactBearerTokens(item))
-		}
-		return out
 	case map[string]any:
 		out := make(map[string]any, len(v))
 		for key, value := range v {
+			if !isKnownAuditArgument(key) {
+				out["other_arguments"] = "[REDACTED]"
+				continue
+			}
 			if isSensitiveAuditKey(key) {
 				out[key] = "[REDACTED]"
 				continue
@@ -1409,17 +1402,38 @@ func sanitizeAuditArguments(raw any) any {
 		}
 		return out
 	case map[string]string:
-		out := make(map[string]string, len(v))
+		out := make(map[string]any, len(v))
 		for key, value := range v {
-			if isSensitiveAuditKey(key) {
-				out[key] = "[REDACTED]"
+			if !isKnownAuditArgument(key) {
+				out["other_arguments"] = "[REDACTED]"
 				continue
 			}
-			out[key] = redactBearerTokens(value)
+			out[key] = sanitizeAuditArguments(value)
 		}
 		return out
-	default:
+	case []any:
+		return map[string]int{"count": len(v)}
+	case []string:
+		return map[string]int{"count": len(v)}
+	case string:
+		return "[REDACTED]"
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		return v
+	default:
+		return "[REDACTED]"
+	}
+}
+
+func isKnownAuditArgument(key string) bool {
+	switch key {
+	case "target", "wordlist", "approval_token", "extensions", "match_codes",
+		"methods", "body", "headers", "rps", "timeout_seconds",
+		"max_duration_seconds", "scan_id", "path", "method",
+		"paths", "auth_matrix_json", "results_file", "description",
+		"base_target", "hits_jsonl", "max_depth", "max_targets":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1656,6 +1670,13 @@ func resolveProbeTarget(baseTarget, rawPath string) (string, error) {
 		if !strings.EqualFold(probeURL.Hostname(), baseURL.Hostname()) {
 			return "", fmt.Errorf("probe URL host %q does not match scan target host %q", probeURL.Hostname(), baseURL.Hostname())
 		}
+		if !strings.EqualFold(probeURL.Scheme, baseURL.Scheme) ||
+			effectiveProbePort(probeURL) != effectiveProbePort(baseURL) {
+			return "", fmt.Errorf("probe URL origin does not match scan target origin")
+		}
+		if probeURL.User != nil {
+			return "", fmt.Errorf("probe URL must not contain userinfo")
+		}
 		return rawPath, nil
 	}
 	if baseTarget == "" {
@@ -1663,7 +1684,7 @@ func resolveProbeTarget(baseTarget, rawPath string) (string, error) {
 	}
 	u, err := url.Parse(baseTarget)
 	if err != nil {
-		return strings.TrimRight(baseTarget, "/") + "/" + strings.TrimLeft(rawPath, "/"), nil
+		return "", fmt.Errorf("base target %q is not a valid URL: %w", baseTarget, err)
 	}
 	if !strings.HasPrefix(rawPath, "/") {
 		rawPath = "/" + rawPath
@@ -1672,7 +1693,22 @@ func resolveProbeTarget(baseTarget, rawPath string) (string, error) {
 	if u.Path == "" {
 		u.Path = rawPath
 	}
+	u.RawPath = "" // Do not reuse an encoded path from the previous URL.
 	return u.String(), nil
+}
+
+func effectiveProbePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 // ── parameter parsers ─────────────────────────────────────────────────────────
