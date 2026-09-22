@@ -60,6 +60,7 @@ func (s *MemoryStore) RecordDecision(decision AnalystDecision, sig PatternSignat
 		DecisionID:  decision.ID,
 		TargetID:    ctx.TargetID,
 		ProjectID:   ctx.ProjectID,
+		CampaignID: ctx.CampaignID,
 		Scope:       scope,
 		Decay: KnowledgeDecay{
 			LastConfirmed: time.Now(),
