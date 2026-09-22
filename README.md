@@ -122,13 +122,16 @@ flowchart TD
 
 ### Key Architectural Pillars
 
-1. **Immutable Event Ledger**: Every discovery, diff, playbook suggestion, and analyst decision is recorded as an immutable event. The entire platform state can be perfectly resurrected from the ledger natively.
-2. **Deterministic Replay**: DirFuzz allows complete time-travel. A campaign's interface, intelligence projection, and target state can be rebuilt and replayed in O(N) linear time without state corruption.
+1. **Evidence History**: Append-mode JSONL retains scan discoveries; TUI sidecar state can restore analyst workspace elements. A unified durable typed-event ledger and complete campaign recovery remain roadmap work.
+2. **Deterministic Projections**: Campaign graph and comparison primitives are designed for replayable outputs. Full crash-safe event persistence and end-to-end replay are not yet implemented.
 3. **Analyst Control Plane**: The system never executes autonomous blind loops. Intelligence suggests actions via `PlaybookSuggestions`, but Analysts retain ultimate execution rights (`ValidationCommand`), closing the human-in-the-loop lifecycle.
-4. **Continuous Regression & Diff Memory**: DirFuzz tracks structural application shifts (e.g., `403 -> 200`). Utilizing `DiffMemory`, if an Analyst dismisses a noisy diff, DirFuzz remembers and suppresses identical structural noise across future campaigns.
+4. **Regression & Diff Memory**: Campaign comparisons detect status, size, content-type, normalized-body-hash, and risk-score changes. Diff-memory structures support analyst decisions; durable cross-campaign persistence is still planned.
 5. **Knowledge Decay**: Intelligence organically decays via an exponential half-life model. A `403` discovered 2 years ago naturally fades in priority, preventing stale API intelligence from poisoning modern queues.
 6. **Playbook Efficacy Grading**: The intelligence layer self-audits, measuring Playbook confirmed yields against false positives (e.g., IDOR_CHECK yields 13% bugs) to influence suggestion ranking organically.
 7. **Explainable Campaign Risk**: Generates high-level posture overviews tracking Attack Surface Growth, Auth Boundary Changes, and Critical Findings—backed by explicitly traceable `RiskReasons`.
+
+
+> **v4.0.3 implementation status:** HTTP scanning and JSONL/TUI history are operational features. `pkg/campaign` contains campaign intelligence primitives, but its `EventStore` is currently an interface and `BuildFromLedger` handles selected event types. Treat full durable campaign replay, multi-backend storage, and cross-session knowledge persistence as roadmap items, not release guarantees.
 
 ## Included Components
 
@@ -152,10 +155,14 @@ Despite its OS-level architecture, the underlying HTTP engine retains all standa
 
 ## Installation
 
-### Method 1: Quick Install (Go Developers)
-If you already have Go installed, you can install all three binaries directly to your system path:
+### Method 1: Build from Source (Go Developers)
+The current Go module is named `dirfuzz` and uses local module replacements; clone the repository before building. The old remote `go install github.com/...@latest` example is not supported by this module layout.
 ```bash
-go install github.com/tobiasare/dirfuzz/cmd/...@latest
+git clone https://github.com/tobiasGuta/Dirfuzz.git
+cd Dirfuzz
+go build -o dirfuzz ./cmd/dirfuzz
+go build -o dirfuzz-monitor ./cmd/monitor
+go build -o dirfuzz-mcp ./cmd/mcp
 ```
 
 ### Method 2: Pre-compiled Binaries
@@ -163,7 +170,7 @@ You can download pre-compiled archives (containing all three tools) for Linux, m
 
 ## Build
 
-Requirements: Go 1.24.2 or newer.
+Requirements: Go 1.25.0 or newer (as declared in `go.mod`).
 
 ```bash
 go build -o dirfuzz ./cmd/dirfuzz
@@ -182,7 +189,7 @@ go build -o dirfuzz-mcp ./cmd/mcp
 ```bash
 ./dirfuzz -u https://example.com -w wordlists/common.txt -o results.jsonl --history-mode append --save-raw
 ```
-In `append` mode, DirFuzz maintains the long-lived Event Ledger (`results.jsonl`). It reconstructs the previous timeline natively upon startup, perfectly preserving Repeater Tabs, Analyst Marks, Knowledge Decay, and Diff Memory.
+In `append` mode, DirFuzz retains prior scan results in `results.jsonl` and restores supported TUI state from a sidecar file. This is not yet a full typed campaign-event ledger or a guarantee of complete crash recovery.
 
 ### 3. Safe Authenticated Routing with Pruning
 ```bash
